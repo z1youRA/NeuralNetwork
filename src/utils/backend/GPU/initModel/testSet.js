@@ -1,3 +1,22 @@
+export function getGradientValues(arrayBuffer, model, Offsets) {
+	const gradientValues = [];
+	for (let tensor of model.tensors) {
+		const tensorGradientValue = [];
+		const tensorIndex = Offsets[3 + tensor.id * 15];
+		const rows = arrayBuffer[tensorIndex + 3];
+		const cols = arrayBuffer[tensorIndex + 4];
+		const gradientIndex = Offsets[3 + tensor.id * 15 + 6];
+		for (let i = 0; i < rows; i++) {
+			for (let j = 0; j < cols; j++) {
+				tensorGradientValue.push(arrayBuffer[gradientIndex + i * cols + j]);
+			}
+		}
+		gradientValues.push(tensorGradientValue);
+		// #TODO isGradient or not?
+	}
+	return gradientValues;
+}
+
 export function getxValues(arrayBuffer, data, Offsets) {
 	const xValues = [];
 	const t = data.tensorInputId;

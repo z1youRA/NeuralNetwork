@@ -38,15 +38,24 @@ import updateData from '../wgsl_operations/updateDataOperations/updateData.wgsl'
 
 import main from '../wgsl_operations/main.wgsl';
 
-import { getxValues } from './testSet.js';
-import { getPredValues } from './testSet.js';
-import { getTrueValues } from './testSet.js';
-import { getErrorValue } from './testSet.js';
-// import Data from '../../CPU/tools/DataClass.js';
+import { getxValues, getPredValues, getTrueValues, getErrorValue, getGradientValues } from './testSet.js';
+import { ref } from 'vue';
 
-// import Data from '../../CPU/tools/DataClass';
+const stopFlag = ref(false);
 
-export async function MatMul(
+function getStopFlag() {
+	return stopFlag.value;
+}
+
+function startTraining() {
+	stopFlag.value = false;
+}
+
+function stopTraining() {
+	stopFlag.value = true;
+}
+
+async function MatMul(
 	Offsets,
 	FlatData,
 	BackwardTape,
@@ -56,8 +65,8 @@ export async function MatMul(
 	model,
 	forwardTape,
 	gradientTape,
-	backwardTape,
-	stopLearning
+	backwardTape
+	// stopFlag
 ) {
 	// Offsets, FlatData, BackwardTape, GradientTape, _iterations, data, model
 	// setAvgError,
@@ -74,8 +83,8 @@ export async function MatMul(
 
 	//init data and other
 
-	console.log('webgpu starts');
-	console.log(model);
+	// console.log('webgpu starts');
+	// console.log(model);
 
 	const numIterations = _iterations;
 
@@ -303,6 +312,11 @@ export async function MatMul(
 		usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
 	});
 
+	const gpuSetBuffer = device.createBuffer({
+		size: FlatData.byteLength,
+		usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+	});
+
 	// var startTime = performance.now();
 	let xValues_all = [];
 	let predValues_all = [];
@@ -321,10 +335,9 @@ export async function MatMul(
 
 	console.log('enter iteration');
 	for (let iteration = 0; iteration < numIterations + 3 * framerate; iteration++) {
-		// console.log(stopLearning == true);
-		// if (stopLearning) {
-		// 	return;
-		// }
+		if (stopFlag.value == true) {
+			return;
+		}
 		data.shuffle();
 
 		inputData = new Float32Array(data.getInputDataBuffer());
@@ -401,6 +414,8 @@ export async function MatMul(
 				await gpuReadAvgAccuracyBuffer.mapAsync(GPUMapMode.READ);
 				const arrayBuffer = new Float32Array(gpuReadBuffer.getMappedRange());
 
+				// getGradientValues(arrayBuffer, model, Offsets);
+
 				predValues_all.push(getPredValues(arrayBuffer, model, Offsets));
 				trueValues_all.push(getTrueValues(arrayBuffer, model, Offsets));
 				errorsArray.push(getErrorValue(arrayBuffer, model, Offsets));
@@ -412,12 +427,11 @@ export async function MatMul(
 				device.queue.submit([gpuCommands]);
 			}
 		}
+
 		if (iteration % framerate < numExtraIterations) {
 			continue;
 		}
 		if (iteration % framerate == numExtraIterations) {
-			// console.log('Frame complete');
-			// console.log(iteration);
 			let xVals = [].concat(...xValues_all);
 			let predVals = [].concat(...predValues_all);
 			let trueVals = [].concat(...trueValues_all);
@@ -435,12 +449,7 @@ export async function MatMul(
 				// await setTrueVals(trueVals);
 				// await setAvgError(avgError);
 				// await setXVals(xVals);
-				// print out information
-				console.log('predVals', predVals);
-				console.log('trueVals', trueVals);
-				console.log('avgError', avgError);
-				// console.log('xVals', xVals);
-				// console.log(data.getInputData());
+				console.log('avgError', avgError, 'iteration', iteration);
 			}
 
 			predValues_all = [];
@@ -531,6 +540,124 @@ export async function MatMul(
 			device.queue.submit([gpuCommands]);
 		}
 
+		// UPLOAD gradients
+		commandEncoder = device.createCommandEncoder();
+		commandEncoder.copyBufferToBuffer(gpuBufferFlatData, 0, gpuReadBuffer, 0, FlatData.byteLength);
+		gpuCommands = commandEncoder.finish();
+		device.queue.submit([gpuCommands]);
+
+		await gpuReadBuffer.mapAsync(GPUMapMode.READ);
+		const dataReadBuffer = new Float32Array(gpuReadBuffer.getMappedRange());
+		const gradientValues = getGradientValues(dataReadBuffer, model, Offsets);
+
+		console.log('LOG: old gradient', gradientValues);
+		const postURL = `http://localhost:8000/submit_gradients`;
+
+		const response = await fetch(postURL, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				'cache-control': 'no-cache',
+			},
+			body: JSON.stringify({
+				client_id: localStorage.getItem('client_id'),
+				gradient: gradientValues,
+				round_id: iteration,
+			}),
+		});
+		let responseJson = await response.json();
+		console.log(`LOG: Submit from client: ${localStorage.getItem('client_id')}`, responseJson);
+
+		while (responseJson.status == 'waiting') {
+			//wait 1s
+			await new Promise((resolve) => setTimeout(resolve, 100));
+			const response = await fetch(`http://localhost:8000/check_round_status/${iteration}`, {
+				method: 'GET',
+				headers: {
+					'cache-control': 'no-cache',
+				},
+			});
+			responseJson = await response.json();
+			console.log('LOG: Waiting for other clients: ', responseJson);
+		}
+
+		if (responseJson.status !== 'complete') {
+			throw new Error('Error: Round not completed');
+		}
+
+		gpuReadBuffer.unmap();
+
+		// get new gradient from server "/api/new-gradient"
+		const getURL = `http://localhost:8000/get_new_gradient`;
+		const responseNewGrad = await fetch(getURL, {
+			method: 'GET',
+			headers: {
+				'Content-Type': 'application/json',
+				'cache-control': 'no-cache',
+			},
+		});
+		const responseNewGradJson = await responseNewGrad.json();
+		const newGradientValues = responseNewGradJson.new_gradient;
+		const flattenedGradientValues = newGradientValues.flat();
+		console.log('LOG: new gradient received', newGradientValues);
+
+		const newGradientValuesBuffer = new Float32Array(flattenedGradientValues);
+
+		console.log('buffer', newGradientValuesBuffer);
+		console.log('buffer.buffer', newGradientValuesBuffer.buffer);
+
+		// copy flatdata to unmap gpuSetBuffer
+		const N = 15; // 每个张量在 Offsets 数组中占用的元素数量
+		let gradientOffset = 0; // newGradientValuesBuffer 的偏移量
+		const sourceBufferSize = newGradientValuesBuffer.byteLength; // 源数据缓冲区大小（字节）
+		const destinationBufferSize = gpuBufferFlatData.size; // 目标缓冲区大小（字节）
+
+		for (let tensor of model.tensors) {
+			const rows = tensor.rows;
+			const cols = tensor.cols;
+			const tensorSizeInElements = rows * cols; // 张量的大小
+
+			// 计算偏移量
+			const baseIndex = 3 + tensor.id * N;
+			const offsetDataIndex = baseIndex + 6;
+			const flatDataOffset = Offsets[offsetDataIndex] * 4; // 数据在 FlatData 中的字节偏移量
+
+			// 将梯度值写入到 gpuBufferFlatData 中
+			if (gradientOffset + tensorSizeInElements * 4 > sourceBufferSize) {
+				console.log('sourceBufferSize', sourceBufferSize);
+				throw new Error('源数据的偏移量和大小超过了源缓冲区的大小。');
+			}
+
+			// 验证目标缓冲区大小
+			if (flatDataOffset + tensorSizeInElements * 4 > destinationBufferSize) {
+				throw new Error('目标缓冲区的偏移量和大小超过了目标缓冲区的大小。');
+			}
+			device.queue.writeBuffer(
+				gpuBufferFlatData, // 目标缓冲区
+				flatDataOffset, // 目标缓冲区的偏移量
+				newGradientValuesBuffer, // 源数据缓冲区
+				gradientOffset, // 源数据的偏移量
+				tensorSizeInElements // 要写入的数据大小
+			);
+			// 更新偏移量
+			gradientOffset += tensorSizeInElements;
+		}
+
+		// 确保写入操作完成
+		await device.queue.onSubmittedWorkDone();
+
+		// for debug
+		commandEncoder = device.createCommandEncoder();
+		commandEncoder.copyBufferToBuffer(gpuBufferFlatData, 0, gpuReadBuffer, 0, FlatData.byteLength);
+		gpuCommands = commandEncoder.finish();
+		device.queue.submit([gpuCommands]);
+
+		await gpuReadBuffer.mapAsync(GPUMapMode.READ);
+		const debugReadBuffer = new Float32Array(gpuReadBuffer.getMappedRange());
+		const updatedGradientData = getGradientValues(debugReadBuffer, model, Offsets);
+		console.log('LOG: updated gradient', updatedGradientData);
+		gpuReadBuffer.unmap();
+
 		// compute type 4 - update data
 		const numUpdates = backwardTape.length;
 		for (let i = 3; i < numUpdates; ++i) {
@@ -562,3 +689,5 @@ export async function MatMul(
 	console.log('iteration complete');
 	return;
 }
+
+export { MatMul, stopTraining, startTraining, getStopFlag };

@@ -3,15 +3,34 @@ import { MatMul } from '/home/thierry/repos/neural_network_vue/neural_network/sr
 import SetUpModel from './utils/backend/CPU/ModelSetup/setUpModel.ts';
 import FlowGraph from './components/FlowGraph.vue';
 import { getCSV_classify } from './utils/backend/CPU/ModelSetup/setUpData.ts';
-import { onMounted } from 'vue';
-
+import {
+	stopTraining,
+	startTraining,
+	getStopFlag,
+} from '/home/thierry/repos/neural_network_vue/neural_network/src/utils/backend/GPU/initModel/GPUTraining.js';
+import {
+	setReadyForTrain,
+	getClientId,
+	stopTrain,
+} from '/home/thierry/repos/neural_network_vue/neural_network/src/utils/backend/CPU/tools/client.ts';
+import { ref } from 'vue';
 // onMounted(() => {
 // 	console.log('mounted');
 // 	getCSV_classify();
 // });
 
-getCSV_classify();
+// getCSV_classify();
 // MatMul();
+
+function clearLocalStorage() {
+	localStorage.clear();
+}
+
+const client_id = ref('');
+
+async function getID() {
+	client_id.value = await getClientId();
+}
 </script>
 
 <template>
@@ -24,6 +43,29 @@ getCSV_classify();
 		</a>
 		<!-- <SetUpModel /> -->
 		<!-- <FlowGraph /> -->
+		<button @click="getID">GET id: {{ client_id }}</button>
+		<button @click="setReadyForTrain(client_id)">Ready</button>
+
+		<button
+			@click="
+				{
+					getCSV_classify();
+					// stopFlag = false;
+				}
+			"
+		>
+			Start Traning
+		</button>
+		<!-- <button
+			@click="
+				stopTraining();
+				stopTrain();
+			"
+		>
+			STOP
+		</button> -->
+
+		<button @click="clearLocalStorage()">Clear Local Storage</button>
 	</div>
 </template>
 <style scoped>

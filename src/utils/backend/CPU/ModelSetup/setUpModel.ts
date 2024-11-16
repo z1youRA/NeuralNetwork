@@ -2,13 +2,7 @@ import { Tensor } from '../tools/TensorClass';
 import { Model } from '../tools/ModelClass';
 import { MatMul } from '../../GPU/initModel/GPUTraining';
 import Data from '../tools/DataClass';
-import { ref } from 'vue';
-const stopLearning = ref(false);
-
-function toggleStopLearning() {
-	stopLearning.value = !stopLearning.value;
-}
-
+import { Ref } from 'vue';
 function setUpModel(data: Data) {
 	// #TODO Hardcode tensors
 	const tensors = [
@@ -483,7 +477,7 @@ function setUpModel(data: Data) {
 		backwardTape.push(curTensor);
 		for (const parTensor of parents) {
 			if (model.tensors[parTensor].requiresGradient) {
-				queueCount[parTensor]++; //#TODO queueCount may be unnecessary, elements in queue can be duplicated
+				queueCount[parTensor]++;
 				// all children of par tensor are traversed already
 				if (queueCount[parTensor] == model.tensors[parTensor].children.length) {
 					queue.push(parTensor);
@@ -549,31 +543,9 @@ function setUpModel(data: Data) {
 	const f32BackwardTape = new Float32Array(backwardTape);
 	const f32GradientTape = new Float32Array(gradientTape);
 
-	// console.log('f32TensorOffsets', f32TensorOffsets);
-	// console.log('f32FlatData', f32FlatData);
-	// console.log('f32BackwardTape', f32BackwardTape);
-	// console.log('f32GradientTape', f32GradientTape);
 	console.log('model.tensors', model);
 	console.log('data', data);
-	MatMul(
-		//   setAvgError,
-		// 	setEdgesActive,
-		// 	setXVals,
-		// 	setTrueVals,
-		// 	setPredVals,
-		f32TensorOffsets,
-		f32FlatData,
-		f32BackwardTape,
-		f32GradientTape,
-		maxNumIterations,
-		data,
-		model,
-		forwardTape,
-		gradientTape,
-		backwardTape,
-		stopLearning
-		// setBreakTraining
-	);
+	MatMul(f32TensorOffsets, f32FlatData, f32BackwardTape, f32GradientTape, maxNumIterations, data, model, forwardTape, gradientTape, backwardTape);
 }
 
 export default setUpModel;
