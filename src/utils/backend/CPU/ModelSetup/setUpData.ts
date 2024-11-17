@@ -3,7 +3,7 @@ import { useComputeGraphStore } from '../../../../store/computeGraphStore';
 import setUpModel from './setUpModel';
 import { getClientId, fetchDataset } from '../tools/client';
 
-const getCSV_classify = async () => {
+const startTrain = async () => {
 	const computeGraphStore = useComputeGraphStore();
 
 	// const datasetName = 'easy_class.';
@@ -29,4 +29,4 @@ const getCSV_classify = async () => {
 	// });
 };
 
-export { getCSV_classify };
+export { startTrain };

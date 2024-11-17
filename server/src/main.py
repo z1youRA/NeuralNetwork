@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from typing import List, Dict
 from fastapi.responses import FileResponse
 import numpy as np
@@ -18,12 +18,12 @@ app.add_middleware(
 	allow_headers=["*"],  # 允许的 HTTP 头
 )
 
+csv_filename = '/home/thierry/repos/neural_network_vue/neural_network/server/public/Datasets/dataClass1.csv'
+
 gradient_storage: Dict[int, Dict[str, List[List[float]]]] = {} # { round_id : {client_id: gradient} }
 ready_clients: List[str] = []
 
-current_round = 0
-
-EXPECTED_CLIENTS = 2
+EXPECTED_CLIENTS = 1
 
 class GradientData(BaseModel):
 	client_id: str
@@ -38,7 +38,6 @@ async def get_client_id():
 
 @app.get("/ready_to_train/{client_id}")
 async def ready_to_train(client_id: str):
-	# global current_round
 	global EXPECTED_CLIENTS
 
 	ready_clients.append(client_id)
@@ -64,18 +63,22 @@ def split_csv(file_path, total_part_num):
 
 @app.get("/get_dataset/{client_id}")
 async def get_dataset(client_id: str):
-	csv_filename = '/home/thierry/repos/neural_network_vue/neural_network/server/public/Datasets/dataClass1.csv'
-	split_csv(csv_filename, EXPECTED_CLIENTS)
-
-	if client_id in ready_clients:
-		client_part_index = ready_clients.index(client_id)
-	else:
+	if client_id not in ready_clients:
 		return {
-			"status": "error",
-			"message": "client is not ready to train",
-			"client_id": client_id
+				"status": "error",
+				"message": "client is not ready to train",
+				"client_id": client_id
 		}
-
+	
+	if len(ready_clients) == 0:
+		return {
+				"status": "error",
+				"message": "client is not ready to train",
+				"client_id": client_id
+		}
+	
+	split_csv(csv_filename, len(ready_clients))
+	client_part_index = ready_clients.index(client_id)
 	part_filename = csv_filename[:-4] + f'_part{client_part_index}.csv'
 	return FileResponse(part_filename, media_type='text/csv', filename=f'part{client_id}.csv')
 
@@ -85,30 +88,33 @@ async def submit_gradients(data: GradientData):
 	global new_gradient
 	
 	round_id = data.round_id
+	client_id = data.client_id
+	gradient = data.gradient
+	if client_id not in ready_clients:
+		return {
+				"status": "error",
+				"message": "client is not ready to train",
+				"client_id": client_id
+		}
 
+	# init gradient_storage[round_id]
 	if round_id not in gradient_storage:
 		gradient_storage[round_id] = {}
 
-	gradient_storage[round_id][data.client_id] = data.gradient
+	gradient_storage[round_id][client_id] = gradient
 
-	print("gradient received from client: " + data.client_id + " len: "+ str(len(data.gradient)))
+	# print("gradient received from client: " + data.client_id + " len: "+ str(len(data.gradient)))
 
-				# for tensor_id, tensorGradient in enumerate(client.gradient):
-				# if tensor_id not in new_gradient.data:
-				# 	new_gradient.data[tensor_id] = tensorGradient.copy()
-				# else:
-				# 	for i, grad_i in enumerate(tensorGradient):
-				# 		new_gradient.data[tensor_id][i] += grad_i
-
-	if len(gradient_storage[round_id]) == EXPECTED_CLIENTS:
-		print("all gradients received")
+	# all gradients received
+	if len(gradient_storage[round_id]) == len(ready_clients):
+		# print("all gradients received")
 		client_gradients = list(gradient_storage[round_id].values())
 		new_gradient = []
 		for tensors in zip(*client_gradients):
-			tensor_avg = [sum(values) / EXPECTED_CLIENTS for values in zip(*tensors)]
+			tensor_avg = [sum(values) / len(ready_clients) for values in zip(*tensors)]
 			new_gradient.append(tensor_avg)
 		del gradient_storage[round_id]
-		print("new_gradient sent", len(new_gradient))
+		# print("new_gradient sent", len(new_gradient))
 		return {
 			"status": "complete",
 			"message": "all gradients received",
@@ -119,15 +125,10 @@ async def submit_gradients(data: GradientData):
 	return {
 		"status": "waiting",
 		"round_id": round_id,
-		"message": f"{EXPECTED_CLIENTS - len(gradient_storage[round_id])} more clients needed"
+		"message": f"{len(ready_clients) - len(gradient_storage[round_id])} more clients needed"
 	}
 
-
-@app.get("/current_round")
-async def get_current_round():
-	return {"current_round": current_round}
-
-@app.get("/check_round_status/{round_id}")
+@app.get("/check_round_status/")
 async def check_round_status(round_id: int):
 	# 已经被删掉了，说明已经收到所有的梯度  check一定是发生在post梯度之后的
 	if (round_id not in gradient_storage):
@@ -136,7 +137,7 @@ async def check_round_status(round_id: int):
 			"message": "all gradients received",
 			"round_id": round_id,
 		}
-	if (len(gradient_storage[round_id]) < EXPECTED_CLIENTS):
+	if (len(gradient_storage[round_id]) < len(ready_clients)):
 		return {
 			"status": "waiting",
 			"round_id": round_id,
@@ -151,10 +152,14 @@ async def check_round_status(round_id: int):
 	
 @app.get("/get_new_gradient")
 async def get_new_gradient():
-
 	if len(new_gradient) == 0:
 		return {"new_gradient": None}
 	
-	print("new gradient sent", len(new_gradient))
+	# print("new gradient sent", len(new_gradient))
 	return {"new_gradient": new_gradient}
 
+@app.get("/reset")
+async def reset_server():
+	ready_clients.clear()
+	new_gradient.clear()
+	gradient_storage.clear()

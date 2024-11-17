@@ -41,6 +41,7 @@ import main from '../wgsl_operations/main.wgsl';
 import { getxValues, getPredValues, getTrueValues, getErrorValue, getGradientValues } from './testSet.js';
 import { ref } from 'vue';
 import { useComputeGraphStore } from '../../../../store/computeGraphStore.js';
+import { getNewGradient, checkRoundStatus, postGradients } from './network.js';
 
 const stopFlag = ref(false);
 
@@ -48,30 +49,19 @@ function getStopFlag() {
 	return stopFlag.value;
 }
 
-function startTraining() {
+function setFlagTrain() {
 	stopFlag.value = false;
 }
 
-function stopTraining() {
+function setFlagStop() {
 	stopFlag.value = true;
 }
 
-async function MatMul(
-	Offsets,
-	FlatData,
-	BackwardTape,
-	GradientTape,
-	_iterations,
-	data,
-	model,
-	forwardTape,
-	gradientTape,
-	backwardTape
-	// stopFlag
-) {
+async function MatMul(Offsets, FlatData, BackwardTape, GradientTape, _iterations, data, model, forwardTape, gradientTape, backwardTape) {
 	const store = useComputeGraphStore();
 
 	const numIterations = _iterations;
+	const server_domain = 'http://localhost:8000';
 
 	const adapter = await navigator.gpu.requestAdapter();
 	if (!adapter) {
@@ -551,34 +541,17 @@ async function MatMul(
 		const dataReadBuffer = new Float32Array(gpuReadBuffer.getMappedRange());
 		const gradientValues = getGradientValues(dataReadBuffer, model, Offsets);
 
-		console.log('LOG: old gradient', gradientValues);
-		const postURL = `http://localhost:8000/submit_gradients`;
-
-		const response = await fetch(postURL, {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				'cache-control': 'no-cache',
-			},
-			body: JSON.stringify({
-				client_id: localStorage.getItem('client_id'),
-				gradient: gradientValues,
-				round_id: iteration,
-			}),
-		});
-		let responseJson = await response.json();
-		console.log(`LOG: Submit from client: ${localStorage.getItem('client_id')}`, responseJson);
+		//POST gradients
+		const responseJson = await postGradients(`${server_domain}/submit_gradients`, localStorage.getItem('client_id'), gradientValues, iteration);
 
 		while (responseJson.status == 'waiting') {
 			//wait 1s
 			await new Promise((resolve) => setTimeout(resolve, 100));
-			const response = await fetch(`http://localhost:8000/check_round_status/${iteration}`, {
-				method: 'GET',
-				headers: {
-					'cache-control': 'no-cache',
-				},
-			});
-			responseJson = await response.json();
+
+			if (stopFlag.value == true) return; // avoid infinite loop
+
+			//Query round status
+			const responseJson = await checkRoundStatus(`${server_domain}/check_round_status`, iteration);
 			console.log('LOG: Waiting for other clients: ', responseJson);
 		}
 
@@ -589,23 +562,13 @@ async function MatMul(
 		gpuReadBuffer.unmap();
 
 		// get new gradient from server "/api/new-gradient"
-		const getURL = `http://localhost:8000/get_new_gradient`;
-		const responseNewGrad = await fetch(getURL, {
-			method: 'GET',
-			headers: {
-				'Content-Type': 'application/json',
-				'cache-control': 'no-cache',
-			},
-		});
-		const responseNewGradJson = await responseNewGrad.json();
+		const responseNewGradJson = await getNewGradient(`${server_domain}/get_new_gradient`);
+
 		const newGradientValues = responseNewGradJson.new_gradient;
 		const flattenedGradientValues = newGradientValues.flat();
-		console.log('LOG: new gradient received', newGradientValues);
+		// console.log('LOG: new gradient received', newGradientValues);
 
 		const newGradientValuesBuffer = new Float32Array(flattenedGradientValues);
-
-		console.log('buffer', newGradientValuesBuffer);
-		console.log('buffer.buffer', newGradientValuesBuffer.buffer);
 
 		// copy flatdata to unmap gpuSetBuffer
 		const N = 15; // 每个张量在 Offsets 数组中占用的元素数量
@@ -648,16 +611,16 @@ async function MatMul(
 		await device.queue.onSubmittedWorkDone();
 
 		// for debug
-		commandEncoder = device.createCommandEncoder();
-		commandEncoder.copyBufferToBuffer(gpuBufferFlatData, 0, gpuReadBuffer, 0, FlatData.byteLength);
-		gpuCommands = commandEncoder.finish();
-		device.queue.submit([gpuCommands]);
+		// commandEncoder = device.createCommandEncoder();
+		// commandEncoder.copyBufferToBuffer(gpuBufferFlatData, 0, gpuReadBuffer, 0, FlatData.byteLength);
+		// gpuCommands = commandEncoder.finish();
+		// device.queue.submit([gpuCommands]);
 
-		await gpuReadBuffer.mapAsync(GPUMapMode.READ);
-		const debugReadBuffer = new Float32Array(gpuReadBuffer.getMappedRange());
-		const updatedGradientData = getGradientValues(debugReadBuffer, model, Offsets);
-		console.log('LOG: updated gradient', updatedGradientData);
-		gpuReadBuffer.unmap();
+		// await gpuReadBuffer.mapAsync(GPUMapMode.READ);
+		// const debugReadBuffer = new Float32Array(gpuReadBuffer.getMappedRange());
+		// const updatedGradientData = getGradientValues(debugReadBuffer, model, Offsets);
+		// console.log('LOG: updated gradient', updatedGradientData);
+		// gpuReadBuffer.unmap();
 
 		// compute type 4 - update data
 		const numUpdates = backwardTape.length;
@@ -691,4 +654,4 @@ async function MatMul(
 	return;
 }
 
-export { MatMul, stopTraining, startTraining, getStopFlag };
+export { MatMul, setFlagStop, setFlagTrain };

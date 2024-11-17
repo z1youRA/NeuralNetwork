@@ -106,10 +106,27 @@ export async function setReadyForTrain(client_id: string): Promise<void> {
 	}
 }
 
-///api/stop-train
-export async function stopTrain(client_id: string): Promise<void> {
+// ///api/stop-train
+// export async function stopTrain(client_id: string): Promise<void> {
+// 	try {
+// 		const response = await fetch(`http://localhost:8000/api/stop-train/`, {
+// 			method: 'GET',
+// 			headers: {
+// 				'Content-Type': 'application/json',
+// 				'Cache-Control': 'no-cache', // 禁用缓存
+// 			},
+// 		});
+// 		if (!response.ok) {
+// 			throw new Error('Network response was not ok');
+// 		}
+// 	} catch (error) {
+// 		console.error('There has been a problem with your fetch operation:', error);
+// 	}
+// }
+
+export async function resetServer(): Promise<void> {
 	try {
-		const response = await fetch(`http://localhost:8000/api/stop-train/`, {
+		const response = await fetch(`http://localhost:8000/reset/`, {
 			method: 'GET',
 			headers: {
 				'Content-Type': 'application/json',
@@ -120,6 +137,6 @@ export async function stopTrain(client_id: string): Promise<void> {
 			throw new Error('Network response was not ok');
 		}
 	} catch (error) {
-		console.error('There has been a problem with your fetch operation:', error);
+		console.error('There has been a problem with your fetch operation', error);
 	}
 }

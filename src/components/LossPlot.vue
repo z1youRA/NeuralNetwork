@@ -1,7 +1,10 @@
 <script setup>
 import { useComputeGraphStore } from '../store/computeGraphStore';
-import { onMounted, onUnmounted, ref } from 'vue';
+import { onMounted, onUnmounted, watch } from 'vue';
 import * as d3 from 'd3';
+
+const props = defineProps(['resetFlag']);
+const emit = defineEmits(['resetComplete']);
 
 const store = useComputeGraphStore();
 
@@ -23,10 +26,19 @@ const unsubscribe = store.$onAction(
 		onError, // action 抛出或拒绝的钩子
 	}) => {
 		if (name === 'setAvgError') {
-			console.log(data);
 			data.push({ x: store.iterations, y: store.avgError });
 			drawLossPlot();
-			console.log('LOG: data updated', data);
+		}
+	}
+);
+
+watch(
+	() => props.resetFlag,
+	(newVal) => {
+		if (newVal == true) {
+			data.length = 1;
+			drawLossPlot();
+			emit('resetComplete');
 		}
 	}
 );
