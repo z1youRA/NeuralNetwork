@@ -40,6 +40,7 @@ import main from '../wgsl_operations/main.wgsl';
 
 import { getxValues, getPredValues, getTrueValues, getErrorValue, getGradientValues } from './testSet.js';
 import { ref } from 'vue';
+import { useComputeGraphStore } from '../../../../store/computeGraphStore.js';
 
 const stopFlag = ref(false);
 
@@ -68,23 +69,7 @@ async function MatMul(
 	backwardTape
 	// stopFlag
 ) {
-	// Offsets, FlatData, BackwardTape, GradientTape, _iterations, data, model
-	// setAvgError,
-	// 	setEdgesActive,
-	// 	setXVals,
-	// 	setTrueVals,
-	// 	setPredVals,
-
-	// 	forwardTape,
-	// 	gradientTape,
-	// 	backwardTape,
-	// 	stopLearning,
-	// 	setBreakTraining;
-
-	//init data and other
-
-	// console.log('webgpu starts');
-	// console.log(model);
+	const store = useComputeGraphStore();
 
 	const numIterations = _iterations;
 
@@ -379,79 +364,95 @@ async function MatMul(
 		const numInferences = forwardTape.length;
 		for (let i = 0; i < numInferences; i++) {
 			const curTensorId = forwardTape[i];
+
+			// 创建 GPU 命令编码器和计算通道
 			const commandEncoder = device.createCommandEncoder();
 			const passEncoder = commandEncoder.beginComputePass();
+
+			// 设置控制缓冲区，指定当前张量 ID 和计算类型
 			let control = new Float32Array([curTensorId, -1, -1, 1, iteration]);
 			device.queue.writeBuffer(controlBuffer, 0, control.buffer, 0, control.byteLength);
+
+			// 设置计算管线和绑定组
 			passEncoder.setPipeline(computePipeline);
 			passEncoder.setBindGroup(0, bindGroup);
+
+			// 计算工作组大小，确保覆盖所有数据
 			let workgroupCountX = Math.ceil(model.tensors[curTensorId].rows / 16);
 			let workgroupCountY = Math.ceil(model.tensors[curTensorId].cols / 16);
+
+			// 执行计算
 			passEncoder.dispatchWorkgroups(workgroupCountX, workgroupCountY);
 			passEncoder.end();
 
-			if (iteration % framerate < numExtraIterations && i == numInferences - 1) {
-				// Encode commands for copying buffer to buffer.
-				commandEncoder.copyBufferToBuffer(
-					gpuBufferFlatData /* source buffer */,
-					0 /* source offset */,
-					gpuReadBuffer /* destination buffer */,
-					0 /* destination offset */,
-					FlatData.byteLength /* size */
-				);
-				commandEncoder.copyBufferToBuffer(
-					gpuBufferAvgAccuracy /* source buffer */,
-					0 /* source offset */,
-					gpuReadAvgAccuracyBuffer /* destination buffer */,
-					0 /* destination offset */,
-					EmptyAccuracies.byteLength /* size */
-				);
-				let gpuCommands = commandEncoder.finish();
-				device.queue.submit([gpuCommands]);
+			// 提交 GPU 命令
+			const gpuCommands = commandEncoder.finish();
+			device.queue.submit([gpuCommands]);
 
-				// Read buffer & setXVals, setTrueVals, setPredVals,
+			// 如果是最后一个张量并且需要读取数据，每一个iteration执行一次
+			if (i === numInferences - 1 && iteration % framerate < numExtraIterations) {
+				// 等待 GPU 执行完成
+				await device.queue.onSubmittedWorkDone();
+
+				// 创建新的命令编码器用于复制数据
+				const readCommandEncoder = device.createCommandEncoder();
+				readCommandEncoder.copyBufferToBuffer(
+					gpuBufferFlatData, // 源缓冲区
+					0, // 源偏移量
+					gpuReadBuffer, // 目标缓冲区
+					0, // 目标偏移量
+					FlatData.byteLength // 数据大小
+				);
+				readCommandEncoder.copyBufferToBuffer(gpuBufferAvgAccuracy, 0, gpuReadAvgAccuracyBuffer, 0, EmptyAccuracies.byteLength);
+
+				// 提交复制命令
+				const readCommands = readCommandEncoder.finish();
+				device.queue.submit([readCommands]);
+
+				// 映射缓冲区以读取数据
 				await gpuReadBuffer.mapAsync(GPUMapMode.READ);
 				await gpuReadAvgAccuracyBuffer.mapAsync(GPUMapMode.READ);
 				const arrayBuffer = new Float32Array(gpuReadBuffer.getMappedRange());
 
-				// getGradientValues(arrayBuffer, model, Offsets);
-
+				// 处理预测值、真实值和误差
 				predValues_all.push(getPredValues(arrayBuffer, model, Offsets));
 				trueValues_all.push(getTrueValues(arrayBuffer, model, Offsets));
-				errorsArray.push(getErrorValue(arrayBuffer, model, Offsets));
+				errorsArray.push(getErrorValue(arrayBuffer, model, Offsets)); // 保存每次迭代的损失值
 				xValues_all.push(getxValues(arrayBuffer, data, Offsets));
+
+				// 解除映射以释放内存
 				gpuReadBuffer.unmap();
 				gpuReadAvgAccuracyBuffer.unmap();
-			} else {
-				let gpuCommands = commandEncoder.finish();
-				device.queue.submit([gpuCommands]);
 			}
 		}
 
-		if (iteration % framerate < numExtraIterations) {
-			continue;
-		}
-		if (iteration % framerate == numExtraIterations) {
+		// 如果在指定的帧率间隔内，跳过后续处理以继续下一次迭代
+		// if (iteration % framerate < numExtraIterations) {
+		// 	continue;
+		// }
+
+		// 在特定的迭代次数，计算并输出平均误差
+		if (iteration % framerate === numExtraIterations) {
 			let xVals = [].concat(...xValues_all);
 			let predVals = [].concat(...predValues_all);
 			let trueVals = [].concat(...trueValues_all);
-			let avgError = 0;
-
-			for (let error of errorsArray) {
-				avgError += error;
-			}
-			if (errorsArray.length > 0) {
-				avgError /= errorsArray.length;
-			}
+			let avgError = errorsArray.reduce((sum, error) => sum + error, 0) / errorsArray.length;
 
 			if (iteration >= framerate - 1) {
-				// await setPredVals(predVals);
-				// await setTrueVals(trueVals);
-				// await setAvgError(avgError);
-				// await setXVals(xVals);
 				console.log('avgError', avgError, 'iteration', iteration);
+				// set store for display
+				// store.avgError = avgError;
+				// store.predVals = predVals;
+				// store.trueVals = trueVals;
+				// store.xVals = xVals;
+				store.setAvgError(avgError);
+				store.setPredVals(predVals);
+				store.setTrueVals(trueVals);
+				store.setXVals(xVals);
+				store.setModelIterations(iteration);
 			}
 
+			// 清空数据数组，准备下一轮数据收集
 			predValues_all = [];
 			trueValues_all = [];
 			xValues_all = [];

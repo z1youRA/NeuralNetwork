@@ -14,13 +14,7 @@ import {
 	stopTrain,
 } from '/home/thierry/repos/neural_network_vue/neural_network/src/utils/backend/CPU/tools/client.ts';
 import { ref } from 'vue';
-// onMounted(() => {
-// 	console.log('mounted');
-// 	getCSV_classify();
-// });
-
-// getCSV_classify();
-// MatMul();
+import LossPlot from './components/LossPlot.vue';
 
 function clearLocalStorage() {
 	localStorage.clear();
@@ -66,6 +60,7 @@ async function getID() {
 		</button> -->
 
 		<button @click="clearLocalStorage()">Clear Local Storage</button>
+		<LossPlot />
 	</div>
 </template>
 <style scoped>
