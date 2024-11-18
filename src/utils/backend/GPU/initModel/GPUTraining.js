@@ -542,16 +542,16 @@ async function MatMul(Offsets, FlatData, BackwardTape, GradientTape, _iterations
 		const gradientValues = getGradientValues(dataReadBuffer, model, Offsets);
 
 		//POST gradients
-		const responseJson = await postGradients(`${server_domain}/submit_gradients`, localStorage.getItem('client_id'), gradientValues, iteration);
+		let responseJson = await postGradients(`${server_domain}/submit_gradients`, localStorage.getItem('client_id'), gradientValues, iteration);
 
 		while (responseJson.status == 'waiting') {
 			//wait 1s
-			await new Promise((resolve) => setTimeout(resolve, 100));
+			await new Promise((resolve) => setTimeout(resolve, 400));
 
 			if (stopFlag.value == true) return; // avoid infinite loop
 
 			//Query round status
-			const responseJson = await checkRoundStatus(`${server_domain}/check_round_status`, iteration);
+			responseJson = await checkRoundStatus(`${server_domain}/check_round_status`, iteration);
 			console.log('LOG: Waiting for other clients: ', responseJson);
 		}
 

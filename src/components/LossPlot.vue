@@ -25,10 +25,12 @@ const unsubscribe = store.$onAction(
 		after, // 在 action 返回或解决后的钩子
 		onError, // action 抛出或拒绝的钩子
 	}) => {
-		if (name === 'setAvgError') {
-			data.push({ x: store.iterations, y: store.avgError });
-			drawLossPlot();
-		}
+		after(() => {
+			if (name === 'setAvgError') {
+				data.push({ x: store.iterations, y: store.avgError });
+				drawLossPlot();
+			}
+		});
 	}
 );
 
