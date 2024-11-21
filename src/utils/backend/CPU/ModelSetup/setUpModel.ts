@@ -543,7 +543,6 @@ function setUpModel(data: Data) {
 	const f32BackwardTape = new Float32Array(backwardTape);
 	const f32GradientTape = new Float32Array(gradientTape);
 
-	console.log('model.tensors', model);
 	console.log('data', data);
 	MatMul(f32TensorOffsets, f32FlatData, f32BackwardTape, f32GradientTape, maxNumIterations, data, model, forwardTape, gradientTape, backwardTape);
 }

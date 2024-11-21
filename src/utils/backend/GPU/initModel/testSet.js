@@ -26,6 +26,7 @@ export function getxValues(arrayBuffer, data, Offsets) {
 	const dataIndexStart = Offsets[3 + t * 15 + 5];
 	for (let j = 0; j < cols; j++) {
 		for (let i = 0; i < rows; i++) {
+			// traverse the data in column major order to get (x, y) pairs
 			xValues.push(arrayBuffer[dataIndexStart + i * cols + j]);
 		}
 	}

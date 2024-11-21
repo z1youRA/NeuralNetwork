@@ -8,6 +8,7 @@ import {
 } from '/home/thierry/repos/neural_network_vue/neural_network/src/utils/backend/CPU/tools/client.ts';
 import { ref } from 'vue';
 import LossPlot from './components/LossPlot.vue';
+import ClassifyPlot from './components/ClassifyPlot.vue';
 
 function clearLocalStorage() {
 	localStorage.clear();
@@ -47,6 +48,7 @@ async function getID() {
 		</button>
 
 		<button @click="clearLocalStorage()">Clear Local ID</button>
+		<ClassifyPlot :reset-flag="resetPlotFlag" @classifyResetComplete="resetPlotFlag = false" />
 		<LossPlot :reset-flag="resetPlotFlag" @resetComplete="resetPlotFlag = false" />
 	</div>
 </template>

@@ -92,7 +92,7 @@ export default class Data {
 			dataFlat.push(this.dataArray[index].slice(1));
 		}
 		const res = transpose(dataFlat).flat();
-		// const res = [].concat.apply([], transpose(dataFlat));
+
 		return [this.input_rows, this.input_cols, this.tensorInputId].concat(res);
 	}
 

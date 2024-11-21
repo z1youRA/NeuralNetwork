@@ -107,9 +107,10 @@ async def submit_gradients(data: GradientData):
 
 	# all gradients received
 	if len(gradient_storage[round_id]) == len(ready_clients):
-		# print("all gradients received")
+		# get all gradients from current round
 		client_gradients = list(gradient_storage[round_id].values())
-		new_gradient = []
+		new_gradient.clear()
+
 		for tensors in zip(*client_gradients):
 			tensor_avg = [sum(values) / len(ready_clients) for values in zip(*tensors)]
 			new_gradient.append(tensor_avg)

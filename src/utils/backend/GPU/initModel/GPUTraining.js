@@ -121,7 +121,6 @@ async function MatMul(Offsets, FlatData, BackwardTape, GradientTape, _iterations
 	});
 
 	data.shuffle();
-	console.log(data.getInputData());
 	let inputData = new Float32Array(data.getInputDataBuffer());
 
 	const inputDataBuffer = device.createBuffer({
@@ -298,14 +297,15 @@ async function MatMul(Offsets, FlatData, BackwardTape, GradientTape, _iterations
 	let trueValues_all = [];
 	let errorsArray = [];
 
-	var numExtraIterations = 1;
-	if (model.batchSize < 50) {
-		numExtraIterations = 10;
-	} else if (model.batchSize < 100) {
-		numExtraIterations = 5;
-	} else if (model.batchSize < 200) {
-		numExtraIterations = 2;
-	}
+	// var numExtraIterations = 1;
+	// if (model.batchSize < 50) {
+	// 	numExtraIterations = 10;
+	// } else if (model.batchSize < 100) {
+	// 	numExtraIterations = 5;
+	// } else if (model.batchSize < 200) {
+	// 	numExtraIterations = 2;
+	// }
+	let numExtraIterations = 0;
 	const framerate = 20;
 
 	console.log('enter iteration');
@@ -314,6 +314,7 @@ async function MatMul(Offsets, FlatData, BackwardTape, GradientTape, _iterations
 			return;
 		}
 		data.shuffle();
+		// console.log(data.getInputDataBuffer());
 
 		inputData = new Float32Array(data.getInputDataBuffer());
 		trueValues = new Float32Array(data.getTrueValuesAny());
@@ -378,43 +379,41 @@ async function MatMul(Offsets, FlatData, BackwardTape, GradientTape, _iterations
 			// 提交 GPU 命令
 			const gpuCommands = commandEncoder.finish();
 			device.queue.submit([gpuCommands]);
-
-			// 如果是最后一个张量并且需要读取数据，每一个iteration执行一次
-			if (i === numInferences - 1 && iteration % framerate < numExtraIterations) {
-				// 等待 GPU 执行完成
-				await device.queue.onSubmittedWorkDone();
-
-				// 创建新的命令编码器用于复制数据
-				const readCommandEncoder = device.createCommandEncoder();
-				readCommandEncoder.copyBufferToBuffer(
-					gpuBufferFlatData, // 源缓冲区
-					0, // 源偏移量
-					gpuReadBuffer, // 目标缓冲区
-					0, // 目标偏移量
-					FlatData.byteLength // 数据大小
-				);
-				readCommandEncoder.copyBufferToBuffer(gpuBufferAvgAccuracy, 0, gpuReadAvgAccuracyBuffer, 0, EmptyAccuracies.byteLength);
-
-				// 提交复制命令
-				const readCommands = readCommandEncoder.finish();
-				device.queue.submit([readCommands]);
-
-				// 映射缓冲区以读取数据
-				await gpuReadBuffer.mapAsync(GPUMapMode.READ);
-				await gpuReadAvgAccuracyBuffer.mapAsync(GPUMapMode.READ);
-				const arrayBuffer = new Float32Array(gpuReadBuffer.getMappedRange());
-
-				// 处理预测值、真实值和误差
-				predValues_all.push(getPredValues(arrayBuffer, model, Offsets));
-				trueValues_all.push(getTrueValues(arrayBuffer, model, Offsets));
-				errorsArray.push(getErrorValue(arrayBuffer, model, Offsets)); // 保存每次迭代的损失值
-				xValues_all.push(getxValues(arrayBuffer, data, Offsets));
-
-				// 解除映射以释放内存
-				gpuReadBuffer.unmap();
-				gpuReadAvgAccuracyBuffer.unmap();
-			}
 		}
+
+		// 在前向传播完成后，处理数据
+		// 等待 GPU 执行完成
+		await device.queue.onSubmittedWorkDone();
+
+		// 创建新的命令编码器用于复制数据
+		const readCommandEncoder = device.createCommandEncoder();
+		readCommandEncoder.copyBufferToBuffer(
+			gpuBufferFlatData, // 源缓冲区
+			0, // 源偏移量
+			gpuReadBuffer, // 目标缓冲区
+			0, // 目标偏移量
+			FlatData.byteLength // 数据大小
+		);
+		readCommandEncoder.copyBufferToBuffer(gpuBufferAvgAccuracy, 0, gpuReadAvgAccuracyBuffer, 0, EmptyAccuracies.byteLength);
+
+		// 提交复制命令
+		const readCommands = readCommandEncoder.finish();
+		device.queue.submit([readCommands]);
+
+		// 映射缓冲区以读取数据
+		await gpuReadBuffer.mapAsync(GPUMapMode.READ);
+		await gpuReadAvgAccuracyBuffer.mapAsync(GPUMapMode.READ);
+		const arrayBuffer = new Float32Array(gpuReadBuffer.getMappedRange());
+
+		// 处理预测值、真实值和误差
+		predValues_all.push(getPredValues(arrayBuffer, model, Offsets));
+		trueValues_all.push(getTrueValues(arrayBuffer, model, Offsets));
+		errorsArray.push(getErrorValue(arrayBuffer, model, Offsets)); // 保存每次迭代的损失值
+		xValues_all.push(getxValues(arrayBuffer, data, Offsets));
+
+		// 解除映射以释放内存
+		gpuReadBuffer.unmap();
+		gpuReadAvgAccuracyBuffer.unmap();
 
 		// 如果在指定的帧率间隔内，跳过后续处理以继续下一次迭代
 		// if (iteration % framerate < numExtraIterations) {
@@ -430,16 +429,12 @@ async function MatMul(Offsets, FlatData, BackwardTape, GradientTape, _iterations
 
 			if (iteration >= framerate - 1) {
 				console.log('avgError', avgError, 'iteration', iteration);
-				// set store for display
-				// store.avgError = avgError;
-				// store.predVals = predVals;
-				// store.trueVals = trueVals;
-				// store.xVals = xVals;
+
+				store.setModelIterations(iteration);
 				store.setAvgError(avgError);
 				store.setPredVals(predVals);
 				store.setTrueVals(trueVals);
 				store.setXVals(xVals);
-				store.setModelIterations(iteration);
 			}
 
 			// 清空数据数组，准备下一轮数据收集

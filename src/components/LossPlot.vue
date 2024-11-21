@@ -46,7 +46,7 @@ watch(
 );
 
 const drawLossPlot = () => {
-	const svg = d3.select('svg').attr('width', width).attr('height', height);
+	const svg = d3.select('.loss-plot').attr('width', width).attr('height', height);
 	svg.selectAll('*').remove();
 
 	if (data.length === 0) {
@@ -100,6 +100,6 @@ onUnmounted(() => {
 <template>
 	<div id="container">
 		<h3>Loss Plot</h3>
-		<svg></svg>
+		<svg class="loss-plot"></svg>
 	</div>
 </template>
