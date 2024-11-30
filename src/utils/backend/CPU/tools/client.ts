@@ -32,7 +32,10 @@ async function fetchClientId(): Promise<string | null> {
 export async function getClientId(): Promise<string> {
 	let c_id = localStorage.getItem('client_id');
 	if (c_id == null) {
-		c_id = await fetchClientId();
+		// c_id = await fetchClientId();
+		//generate id
+		c_id = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+		localStorage.setItem('client_id', c_id);
 		// console.log('get client_id from server', c_id);
 	}
 
@@ -126,7 +129,7 @@ export async function setReadyForTrain(client_id: string): Promise<void> {
 
 export async function resetServer(): Promise<void> {
 	try {
-		const response = await fetch(`http://localhost:8000/reset/`, {
+		const response = await fetch(`http://localhost:8000/reset`, {
 			method: 'GET',
 			headers: {
 				'Content-Type': 'application/json',

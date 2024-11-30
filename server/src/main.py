@@ -1,21 +1,22 @@
-from fastapi import FastAPI, HTTPException, Query
-from typing import List, Dict
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
+from typing import List, Dict, Set
 from fastapi.responses import FileResponse
 import numpy as np
 import pandas
 from pydantic import BaseModel
 import uuid
 from fastapi.middleware.cors import CORSMiddleware
+import json
 
 app = FastAPI()
 
 app.add_middleware(
 	CORSMiddleware,
-	allow_origins=["http://localhost:5173", "http://localhost:5174"],  # 允许的源
-	# allow_origins=["*"],  # 允许的源
+	allow_origins=["*"],  # 允许所有来源
 	allow_credentials=True,
 	allow_methods=["*"],  # 允许的 HTTP 方法
 	allow_headers=["*"],  # 允许的 HTTP 头
+	expose_headers=["*"]
 )
 
 csv_filename = '/home/thierry/repos/neural_network_vue/neural_network/server/public/Datasets/dataClass1.csv'
@@ -131,7 +132,7 @@ async def submit_gradients(data: GradientData):
 
 @app.get("/check_round_status/")
 async def check_round_status(round_id: int):
-	# 已经被删掉了，说明已经收到所有的梯度  check一定是发生在post梯度之后的
+	# 已经被删掉了，说明已经��到所有的梯度  check一定是发生在post梯度之后的
 	if (round_id not in gradient_storage):
 		return {
 			"status": "complete",
@@ -164,3 +165,73 @@ async def reset_server():
 	ready_clients.clear()
 	new_gradient.clear()
 	gradient_storage.clear()
+
+# WebSocket连接管理
+class ConnectionManager:
+	def __init__(self):
+		self.active_connections: Dict[str, WebSocket] = {}  # client_id -> websocket
+		
+	async def connect(self, client_id: str, websocket: WebSocket):
+		await websocket.accept()
+		self.active_connections[client_id] = websocket
+		
+	def disconnect(self, client_id: str):
+		if client_id in self.active_connections:
+			del self.active_connections[client_id]
+			
+	async def broadcast_gradient(self, new_gradient: List[List[float]]):
+		# 广播新梯度给所有连接的客户端
+		message = {"type": "new_gradient", "gradient": new_gradient}
+		for websocket in self.active_connections.values():
+			await websocket.send_json(message)
+
+manager = ConnectionManager()
+
+@app.websocket("/ws/{client_id}")
+async def websocket_endpoint(websocket: WebSocket, client_id: str):
+    print(f"Attempting to connect client: {client_id}")
+    try:
+        await manager.connect(client_id, websocket)
+        print(f"Client connected successfully: {client_id}")
+        
+        while True:
+            try:
+                data = await websocket.receive_json()
+                # print(f"Received data from client {client_id}: {data['type']}")
+                
+                if data["type"] == "gradient":
+                    round_id = data["round_id"]
+                    gradient = data["gradient"]
+                    
+                    if round_id not in gradient_storage:
+                        gradient_storage[round_id] = {}
+                        
+                    gradient_storage[round_id][client_id] = gradient
+                    # print(f"Gradient received from client: {client_id}, length: {len(gradient)}")
+                    
+                    if len(gradient_storage[round_id]) == len(ready_clients):
+                        client_gradients = list(gradient_storage[round_id].values())
+                        new_gradient.clear()
+                        
+                        for tensors in zip(*client_gradients):
+                            tensor_avg = [sum(values) / len(ready_clients) for values in zip(*tensors)]
+                            new_gradient.append(tensor_avg)
+                            
+                        del gradient_storage[round_id]
+                        # print(f"Broadcasting new gradient to all clients")
+                        await manager.broadcast_gradient(new_gradient)
+                        
+            except json.JSONDecodeError as e:
+                print(f"JSON decode error: {e}")
+                continue
+                
+    except WebSocketDisconnect:
+        print(f"Client disconnected: {client_id}")
+        manager.disconnect(client_id)
+        if client_id in ready_clients:
+            ready_clients.remove(client_id)
+    except Exception as e:
+        print(f"Error in websocket connection: {e}")
+        manager.disconnect(client_id)
+        if client_id in ready_clients:
+            ready_clients.remove(client_id)

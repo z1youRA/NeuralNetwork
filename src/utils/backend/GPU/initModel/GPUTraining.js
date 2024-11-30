@@ -41,7 +41,7 @@ import main from '../wgsl_operations/main.wgsl';
 import { getxValues, getPredValues, getTrueValues, getErrorValue, getGradientValues } from './testSet.js';
 import { ref } from 'vue';
 import { useComputeGraphStore } from '../../../../store/computeGraphStore.js';
-import { getNewGradient, checkRoundStatus, postGradients } from './network.js';
+import { initWebSocket, postGradients } from './network.js';
 
 const stopFlag = ref(false);
 
@@ -59,6 +59,10 @@ function setFlagStop() {
 
 async function MatMul(Offsets, FlatData, BackwardTape, GradientTape, _iterations, data, model, forwardTape, gradientTape, backwardTape) {
 	const store = useComputeGraphStore();
+	const client_id = localStorage.getItem('client_id');
+
+	// 初始化WebSocket连接
+	await initWebSocket(client_id);
 
 	const numIterations = _iterations;
 	const server_domain = 'http://localhost:8000';
@@ -308,11 +312,17 @@ async function MatMul(Offsets, FlatData, BackwardTape, GradientTape, _iterations
 	let numExtraIterations = 0;
 	const framerate = 20;
 
+	let totalPollingTime = 0;
+	let totalTrainingTime = 0;
+
 	console.log('enter iteration');
 	for (let iteration = 0; iteration < numIterations + 3 * framerate; iteration++) {
 		if (stopFlag.value == true) {
 			return;
 		}
+
+		const trainingStartTime = performance.now();
+
 		data.shuffle();
 		// console.log(data.getInputDataBuffer());
 
@@ -536,40 +546,26 @@ async function MatMul(Offsets, FlatData, BackwardTape, GradientTape, _iterations
 		const dataReadBuffer = new Float32Array(gpuReadBuffer.getMappedRange());
 		const gradientValues = getGradientValues(dataReadBuffer, model, Offsets);
 
-		//POST gradients
-		let responseJson = await postGradients(`${server_domain}/submit_gradients`, localStorage.getItem('client_id'), gradientValues, iteration);
+		const pollingStartTime = performance.now();
 
-		while (responseJson.status == 'waiting') {
-			//wait 1s
-			await new Promise((resolve) => setTimeout(resolve, 400));
+		//POST gradients and wait for response
+		const newGradientValues = await postGradients(client_id, gradientValues, iteration);
 
-			if (stopFlag.value == true) return; // avoid infinite loop
-
-			//Query round status
-			responseJson = await checkRoundStatus(`${server_domain}/check_round_status`, iteration);
-			console.log('LOG: Waiting for other clients: ', responseJson);
-		}
-
-		if (responseJson.status !== 'complete') {
-			throw new Error('Error: Round not completed');
-		}
+		const pollingEndTime = performance.now();
+		totalPollingTime += pollingEndTime - pollingStartTime;
 
 		gpuReadBuffer.unmap();
 
-		// get new gradient from server "/api/new-gradient"
-		const responseNewGradJson = await getNewGradient(`${server_domain}/get_new_gradient`);
-
-		const newGradientValues = responseNewGradJson.new_gradient;
+		// 更新模型梯度
 		const flattenedGradientValues = newGradientValues.flat();
-		// console.log('LOG: new gradient received', newGradientValues);
 
 		const newGradientValuesBuffer = new Float32Array(flattenedGradientValues);
 
-		// copy flatdata to unmap gpuSetBuffer
-		const N = 15; // 每个张量在 Offsets 数组中占用的元素数量
-		let gradientOffset = 0; // newGradientValuesBuffer 的偏移量
-		const sourceBufferSize = newGradientValuesBuffer.byteLength; // 源数据缓冲区大小（字节）
-		const destinationBufferSize = gpuBufferFlatData.size; // 目标缓冲区大小（字节）
+		// 更新缓冲区中的梯度数据
+		const N = 15;
+		let gradientOffset = 0;
+		const sourceBufferSize = newGradientValuesBuffer.byteLength;
+		const destinationBufferSize = gpuBufferFlatData.size;
 
 		for (let tensor of model.tensors) {
 			const rows = tensor.rows;
@@ -643,7 +639,13 @@ async function MatMul(Offsets, FlatData, BackwardTape, GradientTape, _iterations
 			let gpuCommands = commandEncoder.finish();
 			device.queue.submit([gpuCommands]);
 		}
+
+		const trainingEndTime = performance.now();
+		totalTrainingTime += trainingEndTime - trainingStartTime;
 	}
+
+	console.log('Total polling time:', totalPollingTime, 'ms');
+	console.log('Total training time:', totalTrainingTime, 'ms');
 
 	console.log('iteration complete');
 	return;
