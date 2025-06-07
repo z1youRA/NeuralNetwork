@@ -18,7 +18,7 @@ app.add_middleware(
 	allow_headers=["*"],  # 允许的 HTTP 头
 )
 
-csv_filename = '/home/thierry/repos/neural_network_vue/neural_network/server/public/Datasets/dataClass1.csv'
+csv_filename = '../public/Datasets/dataClass1.csv'
 
 gradient_storage: Dict[int, Dict[str, List[List[float]]]] = {} # { round_id : {client_id: gradient} }
 ready_clients: List[str] = []
