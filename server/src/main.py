@@ -11,7 +11,7 @@ app = FastAPI()
 
 app.add_middleware(
 	CORSMiddleware,
-	allow_origins=["http://localhost:5173", "http://localhost:5174", "http://47.103.112.245:5173/", "http://47.103.112.245:5174/"],  # 允许的源
+	allow_origins=["http://localhost:5173", "http://localhost:5174", "http://47.103.112.245:5173", "http://47.103.112.245:5174"],  # 允许的源
 	# allow_origins=["*"],  # 允许的源
 	allow_credentials=True,
 	allow_methods=["*"],  # 允许的 HTTP 方法
