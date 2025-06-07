@@ -1,11 +1,11 @@
 <script setup>
 import { startTrain } from './utils/backend/CPU/ModelSetup/setUpData.ts';
-import { setFlagTrain, setFlagStop } from '/home/thierry/repos/neural_network_vue/neural_network/src/utils/backend/GPU/initModel/GPUTraining.js';
+import { setFlagTrain, setFlagStop } from './utils/backend/GPU/initModel/GPUTraining.js';
 import {
 	setReadyForTrain,
 	getClientId,
 	resetServer,
-} from '/home/thierry/repos/neural_network_vue/neural_network/src/utils/backend/CPU/tools/client.ts';
+} from './utils/backend/CPU/tools/client.ts';
 import { ref } from 'vue';
 import LossPlot from './components/LossPlot.vue';
 import ClassifyPlot from './components/ClassifyPlot.vue';
