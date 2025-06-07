@@ -1,9 +1,10 @@
 // client.ts
 
 // 定义一个函数来请求客户端 ID
+const serverUrl = 'http://localhost:8000';
 async function fetchClientId(): Promise<string | null> {
 	try {
-		const response = await fetch('http://localhost:8000/get_client_id', {
+		const response = await fetch(`${serverUrl}/get_client_id`, {
 			method: 'GET',
 			headers: {
 				'Content-Type': 'application/json',
@@ -45,7 +46,7 @@ export async function getClientId(): Promise<string> {
 //api/start-train/{dataset_name}
 export async function startTrain(datasetName: string) {
 	try {
-		const response = await fetch(`http://localhost:8000/api/start-train/${datasetName}`, {
+		const response = await fetch(`${serverUrl}/api/start-train/${datasetName}`, {
 			method: 'GET',
 			headers: {
 				'Content-Type': 'application/json',
@@ -66,7 +67,7 @@ export async function startTrain(datasetName: string) {
 // /api/dataset/{dataset_name}
 export async function fetchDataset(client_id: string): Promise<string> {
 	try {
-		const response = await fetch(`http://localhost:8000/get_dataset/${client_id}`, {
+		const response = await fetch(`${serverUrl}/get_dataset/${client_id}`, {
 			method: 'GET',
 			headers: {
 				'Content-Type': 'application/json',
@@ -89,7 +90,7 @@ export async function fetchDataset(client_id: string): Promise<string> {
 export async function setReadyForTrain(client_id: string): Promise<void> {
 	try {
 		console.log('set ready for train', client_id);
-		const response = await fetch(`http://localhost:8000/ready_to_train/${client_id}`, {
+		const response = await fetch(`${serverUrl}/ready_to_train/${client_id}`, {
 			method: 'GET',
 			headers: {
 				'Content-Type': 'application/json',
@@ -126,7 +127,7 @@ export async function setReadyForTrain(client_id: string): Promise<void> {
 
 export async function resetServer(): Promise<void> {
 	try {
-		const response = await fetch(`http://localhost:8000/reset/`, {
+		const response = await fetch(`${serverUrl}/reset/`, {
 			method: 'GET',
 			headers: {
 				'Content-Type': 'application/json',
