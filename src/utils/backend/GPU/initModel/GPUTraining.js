@@ -61,7 +61,7 @@ async function MatMul(Offsets, FlatData, BackwardTape, GradientTape, _iterations
 	const store = useComputeGraphStore();
 
 	const numIterations = _iterations;
-	const server_domain = 'http://localhost:8000';
+	const server_domain = 'http://47.103.112.245:8000';
 
 	const adapter = await navigator.gpu.requestAdapter();
 	if (!adapter) {
