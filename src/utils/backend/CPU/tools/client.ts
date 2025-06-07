@@ -1,7 +1,7 @@
 // client.ts
 
 // 定义一个函数来请求客户端 ID
-const serverUrl = 'http://localhost:8000';
+const serverUrl = 'http://47.103.112.245:8000';
 async function fetchClientId(): Promise<string | null> {
 	try {
 		const response = await fetch(`${serverUrl}/get_client_id`, {
