@@ -42,12 +42,74 @@ import { getxValues, getPredValues, getTrueValues, getErrorValue, getGradientVal
 import { ref } from 'vue';
 import { useComputeGraphStore } from '../../../../store/computeGraphStore.js';
 import { getNewGradient, checkRoundStatus, postGradients } from './network.js';
+import { SERVER_CONFIG } from '../../../../config/serverConfig.ts';
+import { registerDevice, submitBenchmark, detectDeviceType } from '../../CPU/tools/deviceDetector.ts';
+import { getClientId } from '../../CPU/tools/client.ts';
+import { submitGradientsWithWebSocket, wsManager } from '../../CPU/tools/websocketManager.ts';
+import VConsole from 'vconsole';
+
+// 默认客户端训练配置
+let clientTrainingConfig = {
+    framerate: 10,
+    batchSize: 32,
+    learningRate: 0.01
+};
+
+// 客户端初始化函数
+async function initializeClient() {
+    try {
+        // 获取客户端ID
+        const clientId = await getClientId();
+        
+        // 注册设备信息
+        const deviceResponse = await registerDevice(clientId);
+        console.log('Device registered:', deviceResponse);
+        
+        // 运行性能基准测试
+        const benchmarkResponse = await submitBenchmark(clientId);
+        console.log('Benchmark completed:', benchmarkResponse);
+        
+        // 获取训练配置
+        if (benchmarkResponse.recommended_config) {
+            clientTrainingConfig = {
+                ...clientTrainingConfig,
+                ...benchmarkResponse.recommended_config
+            };
+            console.log('Client training config:', clientTrainingConfig);
+        }
+        
+        return {
+            clientId,
+            config: clientTrainingConfig,
+            performance_tier: benchmarkResponse.performance_tier
+        };
+    } catch (error) {
+        console.error('Failed to initialize client:', error);
+        return null;
+    }
+}
+
+const isPc = () => {
+	const userAgentInfo = navigator.userAgent;
+    const Agents = ["Android", "iPhone",
+        "SymbianOS", "Windows Phone",
+        "iPad", "iPod"];
+    let flag = true;
+    for (let v = 0; v < Agents.length; v++) {
+        if (userAgentInfo.indexOf(Agents[v]) > 0) {
+            flag = false;
+            break;
+        }
+    }
+    return flag;
+}
+
+if (process.env.NODE_ENV != "prod" && !isPc()) {
+	console.log(process.env.NODE_ENV);
+	const vConsole = new VConsole();
+}
 
 const stopFlag = ref(false);
-
-function getStopFlag() {
-	return stopFlag.value;
-}
 
 function setFlagTrain() {
 	stopFlag.value = false;
@@ -60,9 +122,18 @@ function setFlagStop() {
 async function MatMul(Offsets, FlatData, BackwardTape, GradientTape, _iterations, data, model, forwardTape, gradientTape, backwardTape) {
 	const store = useComputeGraphStore();
 
-	const numIterations = _iterations;
-	const server_domain = 'http://47.103.112.245:8000';
+	// 初始化客户端配置
+	const clientInfo = await initializeClient();
+	if (!clientInfo) {
+		console.error('Failed to initialize client, using default configuration');
+	}
 
+	const numIterations = _iterations;
+	const server_domain = SERVER_CONFIG.baseUrl;
+
+	// 使用动态配置的帧率
+	const framerate = clientTrainingConfig.framerate;
+	
 	const adapter = await navigator.gpu.requestAdapter();
 	if (!adapter) {
 		console.log('no adapter');
@@ -306,15 +377,29 @@ async function MatMul(Offsets, FlatData, BackwardTape, GradientTape, _iterations
 	// 	numExtraIterations = 2;
 	// }
 	let numExtraIterations = 0;
-	const framerate = 20;
 
-	console.log('enter iteration');
+	console.log('enter iteration with config:', clientTrainingConfig);
+	const startTime = performance.now();
+	
+	// 建立WebSocket连接
+	const clientId = localStorage.getItem('client_id');
+	if (clientId) {
+		try {
+			await wsManager.connect(clientId);
+			console.log('WebSocket connection established');
+		} catch (error) {
+			console.warn('WebSocket connection failed, will use polling fallback:', error);
+		}
+	}
+
 	for (let iteration = 0; iteration < numIterations + 3 * framerate; iteration++) {
 		if (stopFlag.value == true) {
 			return;
 		}
+		
+		const iterationStartTime = performance.now();
+		
 		data.shuffle();
-		// console.log(data.getInputDataBuffer());
 
 		inputData = new Float32Array(data.getInputDataBuffer());
 		trueValues = new Float32Array(data.getTrueValuesAny());
@@ -408,17 +493,12 @@ async function MatMul(Offsets, FlatData, BackwardTape, GradientTape, _iterations
 		// 处理预测值、真实值和误差
 		predValues_all.push(getPredValues(arrayBuffer, model, Offsets));
 		trueValues_all.push(getTrueValues(arrayBuffer, model, Offsets));
-		errorsArray.push(getErrorValue(arrayBuffer, model, Offsets)); // 保存每次迭代的损失值
+		errorsArray.push(getErrorValue(arrayBuffer, model, Offsets));
 		xValues_all.push(getxValues(arrayBuffer, data, Offsets));
 
 		// 解除映射以释放内存
 		gpuReadBuffer.unmap();
 		gpuReadAvgAccuracyBuffer.unmap();
-
-		// 如果在指定的帧率间隔内，跳过后续处理以继续下一次迭代
-		// if (iteration % framerate < numExtraIterations) {
-		// 	continue;
-		// }
 
 		// 在特定的迭代次数，计算并输出平均误差
 		if (iteration % framerate === numExtraIterations) {
@@ -427,14 +507,22 @@ async function MatMul(Offsets, FlatData, BackwardTape, GradientTape, _iterations
 			let trueVals = [].concat(...trueValues_all);
 			let avgError = errorsArray.reduce((sum, error) => sum + error, 0) / errorsArray.length;
 
-			if (iteration >= framerate - 1) {
-				console.log('avgError', avgError, 'iteration', iteration);
+			console.log('avgError', avgError, 'iteration', iteration);
 
-				store.setModelIterations(iteration);
-				store.setAvgError(avgError);
-				store.setPredVals(predVals);
-				store.setTrueVals(trueVals);
-				store.setXVals(xVals);
+			store.setModelIterations(iteration);
+			store.setAvgError(avgError);
+			store.setPredVals(predVals);
+			store.setTrueVals(trueVals);
+			store.setXVals(xVals);
+
+			if (avgError < 0.2) {
+				const endTime = performance.now();
+				const elapsedTime = endTime - startTime;
+				console.log('Elapsed time for whole Training', elapsedTime, 'ms');
+				console.log('Training complete with avgError:', avgError);
+				store.setTrainingComplete(true);
+				stopFlag.value = true;
+				break;
 			}
 
 			// 清空数据数组，准备下一轮数据收集
@@ -536,28 +624,55 @@ async function MatMul(Offsets, FlatData, BackwardTape, GradientTape, _iterations
 		const dataReadBuffer = new Float32Array(gpuReadBuffer.getMappedRange());
 		const gradientValues = getGradientValues(dataReadBuffer, model, Offsets);
 
-		//POST gradients
-		let responseJson = await postGradients(`${server_domain}/submit_gradients`, localStorage.getItem('client_id'), gradientValues, iteration);
+		// 计算这轮的计算时间
+		const iterationTime = performance.now() - iterationStartTime;
 
-		while (responseJson.status == 'waiting') {
-			//wait 1s
-			await new Promise((resolve) => setTimeout(resolve, 400));
+		// 使用WebSocket提交梯度（带轮询回退）
+		let responseJson;
+		try {
+			responseJson = await submitGradientsWithWebSocket(
+				localStorage.getItem('client_id'), 
+				gradientValues, 
+				iteration,
+				iterationTime
+			);
 
-			if (stopFlag.value == true) return; // avoid infinite loop
+			if (responseJson.status !== 'complete') {
+				throw new Error('Error: Round not completed');
+			}
 
-			//Query round status
-			responseJson = await checkRoundStatus(`${server_domain}/check_round_status`, iteration);
-			console.log('LOG: Waiting for other clients: ', responseJson);
-		}
+			console.log('Round completed successfully via WebSocket');
+		} catch (error) {
+			console.error('WebSocket gradient submission failed:', error);
+			
+			// 如果WebSocket失败，使用传统轮询方式
+			console.log('Falling back to traditional polling...');
+			responseJson = await postGradients(
+				`${server_domain}${SERVER_CONFIG.endpoints.submitGradients}`, 
+				localStorage.getItem('client_id'), 
+				gradientValues, 
+				iteration
+			);
 
-		if (responseJson.status !== 'complete') {
-			throw new Error('Error: Round not completed');
+			// 传统轮询等待
+			while (responseJson.status == 'waiting') {
+				await new Promise((resolve) => setTimeout(resolve, 400));
+
+				if (stopFlag.value == true) return;
+
+				responseJson = await checkRoundStatus(`${server_domain}${SERVER_CONFIG.endpoints.checkRoundStatus}`, iteration);
+				console.log('LOG: Waiting for other clients (polling fallback): ', responseJson);
+			}
+
+			if (responseJson.status !== 'complete') {
+				throw new Error('Error: Round not completed');
+			}
 		}
 
 		gpuReadBuffer.unmap();
 
 		// get new gradient from server "/api/new-gradient"
-		const responseNewGradJson = await getNewGradient(`${server_domain}/get_new_gradient`);
+		const responseNewGradJson = await getNewGradient(`${server_domain}${SERVER_CONFIG.endpoints.getNewGradient}`);
 
 		const newGradientValues = responseNewGradJson.new_gradient;
 		const flattenedGradientValues = newGradientValues.flat();
@@ -605,18 +720,6 @@ async function MatMul(Offsets, FlatData, BackwardTape, GradientTape, _iterations
 		// 确保写入操作完成
 		await device.queue.onSubmittedWorkDone();
 
-		// for debug
-		// commandEncoder = device.createCommandEncoder();
-		// commandEncoder.copyBufferToBuffer(gpuBufferFlatData, 0, gpuReadBuffer, 0, FlatData.byteLength);
-		// gpuCommands = commandEncoder.finish();
-		// device.queue.submit([gpuCommands]);
-
-		// await gpuReadBuffer.mapAsync(GPUMapMode.READ);
-		// const debugReadBuffer = new Float32Array(gpuReadBuffer.getMappedRange());
-		// const updatedGradientData = getGradientValues(debugReadBuffer, model, Offsets);
-		// console.log('LOG: updated gradient', updatedGradientData);
-		// gpuReadBuffer.unmap();
-
 		// compute type 4 - update data
 		const numUpdates = backwardTape.length;
 		for (let i = 3; i < numUpdates; ++i) {
@@ -646,6 +749,12 @@ async function MatMul(Offsets, FlatData, BackwardTape, GradientTape, _iterations
 	}
 
 	console.log('iteration complete');
+	
+	// 清理WebSocket连接
+	if (wsManager.isConnected()) {
+		wsManager.disconnect();
+	}
+	
 	return;
 }
 

@@ -23,5 +23,8 @@ dist-ssr
 *.sln
 *.sw?
 
+# npm lockfile (we use yarn)
+package-lock.json
+
 server/src/__pycache__/*
 server/public/Datasets/dataClass1_*

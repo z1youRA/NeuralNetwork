@@ -1,10 +1,12 @@
 // client.ts
 
+import { SERVER_CONFIG } from '../../../../config/serverConfig';
+
 // 定义一个函数来请求客户端 ID
-const serverUrl = 'http://47.103.112.245:8000';
+const serverUrl = SERVER_CONFIG.baseUrl;
 async function fetchClientId(): Promise<string | null> {
 	try {
-		const response = await fetch(`${serverUrl}/get_client_id`, {
+		const response = await fetch(`${serverUrl}${SERVER_CONFIG.endpoints.getClientId}`, {
 			method: 'GET',
 			headers: {
 				'Content-Type': 'application/json',
@@ -34,7 +36,7 @@ export async function getClientId(): Promise<string> {
 	let c_id = localStorage.getItem('client_id');
 	if (c_id == null) {
 		c_id = await fetchClientId();
-		// console.log('get client_id from server', c_id);
+		console.log('get client_id from server', c_id);
 	}
 
 	if (c_id == null) {
@@ -46,7 +48,7 @@ export async function getClientId(): Promise<string> {
 //api/start-train/{dataset_name}
 export async function startTrain(datasetName: string) {
 	try {
-		const response = await fetch(`${serverUrl}/api/start-train/${datasetName}`, {
+		const response = await fetch(`${serverUrl}${SERVER_CONFIG.endpoints.startTrain}/${datasetName}`, {
 			method: 'GET',
 			headers: {
 				'Content-Type': 'application/json',
@@ -67,7 +69,7 @@ export async function startTrain(datasetName: string) {
 // /api/dataset/{dataset_name}
 export async function fetchDataset(client_id: string): Promise<string> {
 	try {
-		const response = await fetch(`${serverUrl}/get_dataset/${client_id}`, {
+		const response = await fetch(`${serverUrl}${SERVER_CONFIG.endpoints.getDataset}/${client_id}`, {
 			method: 'GET',
 			headers: {
 				'Content-Type': 'application/json',
@@ -90,7 +92,7 @@ export async function fetchDataset(client_id: string): Promise<string> {
 export async function setReadyForTrain(client_id: string): Promise<void> {
 	try {
 		console.log('set ready for train', client_id);
-		const response = await fetch(`${serverUrl}/ready_to_train/${client_id}`, {
+		const response = await fetch(`${serverUrl}${SERVER_CONFIG.endpoints.readyToTrain}/${client_id}`, {
 			method: 'GET',
 			headers: {
 				'Content-Type': 'application/json',
@@ -127,7 +129,7 @@ export async function setReadyForTrain(client_id: string): Promise<void> {
 
 export async function resetServer(): Promise<void> {
 	try {
-		const response = await fetch(`${serverUrl}/reset/`, {
+		const response = await fetch(`${serverUrl}${SERVER_CONFIG.endpoints.reset}/`, {
 			method: 'GET',
 			headers: {
 				'Content-Type': 'application/json',
